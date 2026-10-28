@@ -1,0 +1,12 @@
+{
+  "formatter": {"id": "torbox"},
+  "sortCriteria": {"global": [{"key": "quality", "direction": "desc"}]},
+  "preferredLanguages": ["French", "English", "Japanese"],
+  "preferredSubtitles": ["French", "English"],
+  "services": [{"id": "torbox", "enabled": true, "credentials": {"apiKey": "<redacted>"}}],
+  "presets": [{"type": "comet", "instanceId": "comet", "enabled": true, "options": {"name": "Comet", "timeout": 7000, "resources": ["stream"]}}],
+  "jellyfin": {
+    "primary": {"name": "Paul"},
+    "personas": [{"id": "maureen", "name": "Maureen", "history": "own"}]
+  }
+}
