@@ -36,8 +36,8 @@ func New(baseURL string) (*Client, error) {
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return nil, errors.New("AIOStreams endpoint must be an origin without credentials or query parameters")
 	}
-	if u.Scheme != "https" && !(u.Scheme == "http" && isLoopbackHost(u.Hostname())) {
-		return nil, errors.New("AIOStreams endpoint must use HTTPS (HTTP is allowed only for loopback qualification)")
+	if u.Scheme != "https" && !(u.Scheme == "http" && isPrivateHTTPHost(u.Hostname())) {
+		return nil, errors.New("AIOStreams endpoint must use HTTPS (HTTP is allowed only for loopback or Kubernetes Service qualification)")
 	}
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -59,8 +59,9 @@ func (c *Client) SetOperatorAuth(username, password string) error {
 	return nil
 }
 
-func isLoopbackHost(host string) bool {
-	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+func isPrivateHTTPHost(host string) bool {
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	return host == "localhost" || host == "127.0.0.1" || host == "::1" || strings.HasSuffix(host, ".svc.cluster.local")
 }
 
 type response struct {

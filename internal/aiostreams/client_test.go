@@ -24,6 +24,14 @@ func TestAllowLoopbackHTTP(t *testing.T) {
 		}
 	}
 }
+
+func TestAllowKubernetesServiceHTTP(t *testing.T) {
+	for _, u := range []string{"http://aiostreams.media.svc.cluster.local", "http://aiostreams.media.svc.cluster.local."} {
+		if _, err := New(u); err != nil {
+			t.Errorf("rejected %s: %v", u, err)
+		}
+	}
+}
 func TestLifecycle(t *testing.T) {
 	var saved json.RawMessage
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
