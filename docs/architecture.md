@@ -6,4 +6,11 @@ API credentials and all configured addon URLs may be secrets. No credentials in 
 
 AIOStreams `JELLYFIN_MAX_PERSONAS` and server-level defaults are environment/runtime configuration managed by Kubernetes GitOps, not by this client library.
 
-Next contract: full schema validation against pinned AIOStreams version, provider framework implementation, secret placeholder resolution, account persistence and acceptance test against isolated AIOStreams. Only after that can an Atlantis root become apply-enabled.
+The implemented resource targets the deployed v2.37.0 UserData contract. It
+uses write-only OpenTofu attributes for passwords and credentials, reads raw
+UserData, overlays managed fields and retains unknown fields. Read operations
+use `AIOSTREAMS_PASSWORD` from the execution environment because write-only
+values are unavailable in the framework Read request. The resource never
+calls DELETE. The Atlantis root remains pending until its dedicated S3
+backend, lock identity, provider package, recovery drill and isolated runtime
+qualification are complete.
