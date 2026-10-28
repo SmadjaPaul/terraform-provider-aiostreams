@@ -8,14 +8,27 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
 type Client struct {
-	BaseURL string
-	HTTP    *http.Client
+	BaseURL      string
+	HTTP         *http.Client
+	operator     *OperatorCredentials
+	sessionMu    sync.Mutex
+	sessionReady bool
+}
+
+// OperatorCredentials authenticate the server-side session used by
+// AIOStreams when CONFIG_ACCESS_KEY protects configuration creation. They are
+// held only in the provider process and are never part of a resource model.
+type OperatorCredentials struct {
+	Username string
+	Password string
 }
 
 func New(baseURL string) (*Client, error) {
@@ -26,7 +39,24 @@ func New(baseURL string) (*Client, error) {
 	if u.Scheme != "https" && !(u.Scheme == "http" && isLoopbackHost(u.Hostname())) {
 		return nil, errors.New("AIOStreams endpoint must use HTTPS (HTTP is allowed only for loopback qualification)")
 	}
-	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), HTTP: &http.Client{Timeout: 20 * time.Second}}, nil
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		return nil, fmt.Errorf("create AIOStreams cookie jar: %w", err)
+	}
+	return &Client{
+		BaseURL: strings.TrimRight(baseURL, "/"),
+		HTTP:    &http.Client{Timeout: 20 * time.Second, Jar: jar},
+	}, nil
+}
+
+// SetOperatorAuth enables the in-memory login session required by protected
+// AIOStreams instances. The caller must provide an already separated pair.
+func (c *Client) SetOperatorAuth(username, password string) error {
+	if strings.TrimSpace(username) == "" || password == "" {
+		return errors.New("AIOStreams operator credentials require a username and password")
+	}
+	c.operator = &OperatorCredentials{Username: username, Password: password}
+	return nil
 }
 
 func isLoopbackHost(host string) bool {
@@ -71,6 +101,9 @@ func (c *Client) request(ctx context.Context, method string, cred *Credentials, 
 }
 
 func (c *Client) requestPath(ctx context.Context, method, path string, cred *Credentials, payload any, out any) error {
+	if err := c.ensureOperatorSession(ctx); err != nil {
+		return err
+	}
 	var body io.Reader
 	if payload != nil {
 		b, err := json.Marshal(payload)
@@ -111,6 +144,49 @@ func (c *Client) requestPath(ctx context.Context, method, path string, cred *Cre
 			return fmt.Errorf("invalid AIOStreams response data: %w", err)
 		}
 	}
+	return nil
+}
+
+func (c *Client) ensureOperatorSession(ctx context.Context) error {
+	if c.operator == nil {
+		return nil
+	}
+	c.sessionMu.Lock()
+	defer c.sessionMu.Unlock()
+	if c.sessionReady {
+		return nil
+	}
+
+	body, err := json.Marshal(map[string]string{
+		"username": c.operator.Username,
+		"password": c.operator.Password,
+	})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/v1/auth/login", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+	res, err := c.HTTP.Do(req)
+	if err != nil {
+		return fmt.Errorf("AIOStreams operator login failed: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 8192))
+		return &HTTPError{Method: http.MethodPost + " /auth/login", Status: res.StatusCode}
+	}
+	var envelope response
+	if err := json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&envelope); err != nil {
+		return fmt.Errorf("invalid AIOStreams login response: %w", err)
+	}
+	if !envelope.Success {
+		return errors.New("AIOStreams operator login returned unsuccessful envelope (detail suppressed)")
+	}
+	c.sessionReady = true
 	return nil
 }
 
