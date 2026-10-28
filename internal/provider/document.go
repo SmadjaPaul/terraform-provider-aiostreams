@@ -11,6 +11,14 @@ import (
 )
 
 func desiredDocument(ctx context.Context, config configurationModel, remote json.RawMessage) (json.RawMessage, error) {
+	return desiredDocumentForUpdate(ctx, config, remote, nil)
+}
+
+// desiredDocumentForUpdate applies write-only PINs only for an initial write
+// or an explicit version change. AIOStreams stores the PIN as a bcrypt hash;
+// once the user changes it, later Terraform updates must preserve the remote
+// hash instead of restoring the bootstrap PIN.
+func desiredDocumentForUpdate(ctx context.Context, config configurationModel, remote json.RawMessage, previous *configurationModel) (json.RawMessage, error) {
 	base := map[string]any{}
 	if len(remote) > 0 {
 		if err := json.Unmarshal(remote, &base); err != nil || base == nil {
@@ -180,9 +188,12 @@ func desiredDocument(ctx context.Context, config configurationModel, remote json
 		if err != nil {
 			return nil, err
 		}
+		if err := validateLockConfiguration(model, "primary_profile"); err != nil {
+			return nil, err
+		}
 		jellyfin := ensureObject(base, "jellyfin")
 		primary := ensureObject(jellyfin, "primary")
-		applyProfile(primary, model, false, ctx)
+		applyProfile(primary, model, false, ctx, shouldApplyLock(model, previousPrimary(previous)))
 		jellyfin["primary"] = primary
 		base["jellyfin"] = jellyfin
 	}
@@ -195,11 +206,16 @@ func desiredDocument(ctx context.Context, config configurationModel, remote json
 		jellyfin := ensureObject(base, "jellyfin")
 		items := make([]any, 0, len(models))
 		for _, model := range models {
+			if err := validateLockConfiguration(model, "personas"); err != nil {
+				return nil, err
+			}
 			item := map[string]any{"id": requiredString(model.ID, "personas.id"), "name": requiredString(model.Name, "personas.name")}
-			if existing := findObjectByString(jellyfin["personas"], "id", model.ID.ValueString()); existing != nil {
+			var existing map[string]any
+			if found := findObjectByString(jellyfin["personas"], "id", model.ID.ValueString()); found != nil {
+				existing = found
 				item = cloneObject(existing)
 			}
-			applyProfile(item, model, true, ctx)
+			applyProfile(item, model, true, ctx, shouldApplyLock(model, previousPersona(previous, model.ID.ValueString())))
 			items = append(items, item)
 		}
 		jellyfin["personas"] = items
@@ -240,6 +256,12 @@ func profileFromObject(value types.Object) (profileModel, error) {
 		}
 		return types.BoolNull()
 	}
+	getInt64 := func(name string) types.Int64 {
+		if item, ok := attrs[name].(types.Int64); ok {
+			return item
+		}
+		return types.Int64Null()
+	}
 	getList := func(name string) types.List {
 		if item, ok := attrs[name].(types.List); ok {
 			return item
@@ -247,18 +269,19 @@ func profileFromObject(value types.Object) (profileModel, error) {
 		return types.ListNull(types.StringType)
 	}
 	return profileModel{
-		ID:       getString("id"),
-		Name:     getString("name"),
-		Avatar:   getString("avatar"),
-		Variants: getList("variants"),
-		Trackers: getList("trackers"),
-		History:  getString("history"),
-		Hidden:   getBool("hidden"),
-		LockWO:   getString("lock_wo"),
+		ID:            getString("id"),
+		Name:          getString("name"),
+		Avatar:        getString("avatar"),
+		Variants:      getList("variants"),
+		Trackers:      getList("trackers"),
+		History:       getString("history"),
+		Hidden:        getBool("hidden"),
+		LockWO:        getString("lock_wo"),
+		LockWOVersion: getInt64("lock_wo_version"),
 	}, nil
 }
 
-func applyProfile(target map[string]any, model profileModel, persona bool, ctx context.Context) {
+func applyProfile(target map[string]any, model profileModel, persona bool, ctx context.Context, applyLock bool) {
 	for key, value := range map[string]types.String{"name": model.Name, "avatar": model.Avatar, "history": model.History} {
 		if !value.IsNull() && !value.IsUnknown() && (!persona || key != "history" || value.ValueString() != "") {
 			target[key] = value.ValueString()
@@ -274,9 +297,59 @@ func applyProfile(target map[string]any, model profileModel, persona bool, ctx c
 			target[key] = values
 		}
 	}
-	if !model.LockWO.IsNull() && !model.LockWO.IsUnknown() && model.LockWO.ValueString() != "" {
+	if applyLock && !model.LockWO.IsNull() && !model.LockWO.IsUnknown() && model.LockWO.ValueString() != "" {
 		target["lock"] = model.LockWO.ValueString()
 	}
+}
+
+func previousPrimary(previous *configurationModel) *profileModel {
+	if previous == nil || previous.Primary.IsNull() || previous.Primary.IsUnknown() {
+		return nil
+	}
+	model, err := profileFromObject(previous.Primary)
+	if err != nil {
+		return nil
+	}
+	return &model
+}
+
+func previousPersona(previous *configurationModel, id string) *profileModel {
+	if previous == nil || previous.Personas.IsNull() || previous.Personas.IsUnknown() {
+		return nil
+	}
+	var models []profileModel
+	if diags := previous.Personas.ElementsAs(context.Background(), &models, false); diags.HasError() {
+		return nil
+	}
+	for i := range models {
+		if !models[i].ID.IsNull() && models[i].ID.ValueString() == id {
+			return &models[i]
+		}
+	}
+	return nil
+}
+
+func shouldApplyLock(model profileModel, previous *profileModel) bool {
+	if model.LockWO.IsNull() || model.LockWO.IsUnknown() || strings.TrimSpace(model.LockWO.ValueString()) == "" {
+		return false
+	}
+	if model.LockWOVersion.IsNull() || model.LockWOVersion.IsUnknown() {
+		return true
+	}
+	if previous == nil || previous.LockWOVersion.IsNull() || previous.LockWOVersion.IsUnknown() {
+		return true
+	}
+	return model.LockWOVersion.ValueInt64() != previous.LockWOVersion.ValueInt64()
+}
+
+func validateLockConfiguration(model profileModel, name string) error {
+	if model.LockWO.IsNull() || model.LockWO.IsUnknown() || strings.TrimSpace(model.LockWO.ValueString()) == "" {
+		return nil
+	}
+	if model.LockWOVersion.IsNull() || model.LockWOVersion.IsUnknown() {
+		return fmt.Errorf("%s.lock_wo requires lock_wo_version; increment the version for an intentional PIN initialization or rotation", name)
+	}
+	return nil
 }
 
 func objectString(value, name string, rejectSecrets bool) (map[string]any, error) {

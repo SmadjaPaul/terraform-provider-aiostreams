@@ -10,9 +10,16 @@ The `aiostreams_configuration` resource provides family profiles, independent
 persona history, native preset/addon configuration, services, catalog
 modifications, templates, language preferences and JSON overlays for the
 remaining non-secret UserData fields. Secret values use OpenTofu write-only
-attributes (`password_wo`, service credentials and secret overlays). Refreshes
+attributes (`password_wo`, service credentials, profile PINs and secret overlays). Refreshes
 use the process-only `AIOSTREAMS_PASSWORD` environment variable because
 OpenTofu deliberately does not make write-only values available to `Read`.
+
+Profile PINs use `lock_wo` plus the non-secret `lock_wo_version`. The write-only
+PIN is sent only on creation or when its version changes; otherwise the remote
+bcrypt hash is preserved. This allows a native AIOStreams/admin PIN change to
+survive later Terraform reconciliations. AIOStreams v2.37.0 does not expose a
+self-service persona PIN-change endpoint; changing a PIN remains a native
+configuration edit, not a provider-specific UI or API.
 
 The resource never calls `DELETE`; removing it from configuration returns a
 diagnostic and leaves the remote account intact. The state contains the UUID,

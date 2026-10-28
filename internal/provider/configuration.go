@@ -86,14 +86,15 @@ type templateModel struct {
 }
 
 type profileModel struct {
-	ID       types.String `tfsdk:"id"`
-	Name     types.String `tfsdk:"name"`
-	Avatar   types.String `tfsdk:"avatar"`
-	Variants types.List   `tfsdk:"variants"`
-	Trackers types.List   `tfsdk:"trackers"`
-	History  types.String `tfsdk:"history"`
-	Hidden   types.Bool   `tfsdk:"hidden"`
-	LockWO   types.String `tfsdk:"lock_wo"`
+	ID            types.String `tfsdk:"id"`
+	Name          types.String `tfsdk:"name"`
+	Avatar        types.String `tfsdk:"avatar"`
+	Variants      types.List   `tfsdk:"variants"`
+	Trackers      types.List   `tfsdk:"trackers"`
+	History       types.String `tfsdk:"history"`
+	Hidden        types.Bool   `tfsdk:"hidden"`
+	LockWO        types.String `tfsdk:"lock_wo"`
+	LockWOVersion types.Int64  `tfsdk:"lock_wo_version"`
 }
 
 func (r *configurationResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -166,12 +167,13 @@ func (r *configurationResource) Schema(_ context.Context, _ resource.SchemaReque
 
 func profileAttributes(persona bool) map[string]schema.Attribute {
 	attrs := map[string]schema.Attribute{
-		"name":     schema.StringAttribute{Optional: true},
-		"avatar":   schema.StringAttribute{Optional: true},
-		"variants": schema.ListAttribute{Optional: true, ElementType: types.StringType},
-		"trackers": schema.ListAttribute{Optional: true, ElementType: types.StringType},
-		"hidden":   schema.BoolAttribute{Optional: true},
-		"lock_wo":  schema.StringAttribute{Optional: true, WriteOnly: true, Sensitive: true},
+		"name":            schema.StringAttribute{Optional: true},
+		"avatar":          schema.StringAttribute{Optional: true},
+		"variants":        schema.ListAttribute{Optional: true, ElementType: types.StringType},
+		"trackers":        schema.ListAttribute{Optional: true, ElementType: types.StringType},
+		"hidden":          schema.BoolAttribute{Optional: true},
+		"lock_wo":         schema.StringAttribute{Optional: true, WriteOnly: true, Sensitive: true},
+		"lock_wo_version": schema.Int64Attribute{Optional: true, Description: "Increment this non-secret value to intentionally initialize or rotate the write-only PIN. When unchanged, the remote PIN hash is preserved."},
 	}
 	if persona {
 		attrs["id"] = schema.StringAttribute{Required: true}
@@ -273,7 +275,7 @@ func (r *configurationResource) Update(ctx context.Context, req resource.UpdateR
 		resp.Diagnostics.AddError("Concurrent AIOStreams update detected", "The remote UserData changed after the last refresh; refusing to overwrite it. Refresh and review the new plan before retrying.")
 		return
 	}
-	desired, err := desiredDocument(ctx, config, remote)
+	desired, err := desiredDocumentForUpdate(ctx, config, remote, &state)
 	if err != nil {
 		resp.Diagnostics.AddError("Invalid AIOStreams configuration", err.Error())
 		return

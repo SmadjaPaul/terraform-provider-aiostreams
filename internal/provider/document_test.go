@@ -6,9 +6,39 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
+
+func testProfileTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"name":            types.StringType,
+		"avatar":          types.StringType,
+		"variants":        types.ListType{ElemType: types.StringType},
+		"trackers":        types.ListType{ElemType: types.StringType},
+		"hidden":          types.BoolType,
+		"lock_wo":         types.StringType,
+		"lock_wo_version": types.Int64Type,
+	}
+}
+
+func testProfileObject(name, lock string, version attr.Value) types.Object {
+	values := map[string]attr.Value{
+		"name":            types.StringValue(name),
+		"avatar":          types.StringNull(),
+		"variants":        types.ListNull(types.StringType),
+		"trackers":        types.ListNull(types.StringType),
+		"hidden":          types.BoolNull(),
+		"lock_wo":         types.StringValue(lock),
+		"lock_wo_version": version,
+	}
+	return types.ObjectValueMust(testProfileTypes(), values)
+}
+
+func testPreviousProfile(name string, version int64) types.Object {
+	return testProfileObject(name, "", types.Int64Value(version))
+}
 
 func TestDesiredDocumentPreservesUnknownRemoteFields(t *testing.T) {
 	config := configurationModel{
@@ -112,6 +142,55 @@ func TestManagedFingerprintIncludesConfiguredJSONFields(t *testing.T) {
 	second := json.RawMessage(`{"hideErrors":false}`)
 	if managedFingerprintForConfig(first, config) == managedFingerprintForConfig(second, config) {
 		t.Fatal("configured JSON fields must participate in drift detection")
+	}
+}
+
+func TestPinBootstrapIsNotReappliedWhenVersionIsUnchanged(t *testing.T) {
+	config := configurationModel{
+		Primary: testProfileObject("Paul", "1234", types.Int64Value(1)),
+	}
+	previous := configurationModel{Primary: testPreviousProfile("Paul", 1)}
+	remote := json.RawMessage(`{"jellyfin":{"primary":{"name":"Paul","lock":"$2b$10$remote-user-pin-hash"}}}`)
+
+	got, err := desiredDocumentForUpdate(context.Background(), config, remote, &previous)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(got, &document); err != nil {
+		t.Fatal(err)
+	}
+	primary := document["jellyfin"].(map[string]any)["primary"].(map[string]any)
+	if primary["lock"] != "$2b$10$remote-user-pin-hash" {
+		t.Fatalf("remote PIN hash was overwritten: %#v", primary["lock"])
+	}
+}
+
+func TestPinBootstrapAppliesWhenVersionChanges(t *testing.T) {
+	config := configurationModel{Primary: testProfileObject("Paul", "1234", types.Int64Value(2))}
+	previous := configurationModel{Primary: testPreviousProfile("Paul", 1)}
+	remote := json.RawMessage(`{"jellyfin":{"primary":{"name":"Paul","lock":"$2b$10$remote-user-pin-hash"}}}`)
+
+	got, err := desiredDocumentForUpdate(context.Background(), config, remote, &previous)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(got, &document); err != nil {
+		t.Fatal(err)
+	}
+	primary := document["jellyfin"].(map[string]any)["primary"].(map[string]any)
+	if primary["lock"] != "1234" {
+		t.Fatalf("version change did not request a PIN rotation: %#v", primary["lock"])
+	}
+}
+
+func TestPinBootstrapRequiresVersion(t *testing.T) {
+	config := configurationModel{Primary: testProfileObject("Paul", "1234", types.Int64Null())}
+	attrs := config.Primary.Attributes()
+	config.Primary = types.ObjectValueMust(testProfileTypes(), attrs)
+	if _, err := desiredDocument(context.Background(), config, nil); err == nil || !strings.Contains(err.Error(), "lock_wo_version") {
+		t.Fatalf("expected lock version validation, got %v", err)
 	}
 }
 
