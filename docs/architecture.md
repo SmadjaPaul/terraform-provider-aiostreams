@@ -6,6 +6,17 @@ API credentials and all configured addon URLs may be secrets. No credentials in 
 
 AIOStreams `JELLYFIN_MAX_PERSONAS` and server-level defaults are environment/runtime configuration managed by Kubernetes GitOps, not by this client library.
 
+Persona `lock` values are native AIOStreams PINs. The API accepts the initial
+numeric PIN and hashes it during persistence; raw UserData reads return the
+stored bcrypt hash only. The provider therefore accepts `lock_wo` together
+with `lock_wo_version`: the write-only value is applied only on the first
+write or an explicit version increment, while later updates retain the
+remote hash. This prevents a user/admin PIN change from being reverted by an
+unrelated Terraform update. `JELLYFIN_PIN_SIGN_IN=false` remains a server
+runtime setting, so the shared configuration password is always required for
+the family picker. v2.37.0 has no native self-service endpoint for a persona
+to change its own PIN.
+
 The implemented resource targets the deployed v2.37.0 UserData contract. It
 uses write-only OpenTofu attributes for passwords and credentials, reads raw
 UserData, overlays managed fields and retains unknown fields. Read operations
