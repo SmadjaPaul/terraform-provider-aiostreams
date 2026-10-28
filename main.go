@@ -9,6 +9,7 @@ import (
 )
 
 var version = "dev"
+var commit = "unknown"
 
 func main() {
 	if err := providerserver.Serve(context.Background(), provider.New(version), providerserver.ServeOpts{

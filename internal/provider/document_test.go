@@ -74,6 +74,16 @@ func TestManagedFingerprintIncludesConfiguredJSONFields(t *testing.T) {
 	}
 }
 
+func TestConcurrentChangeDetected(t *testing.T) {
+	state := configurationModel{
+		ConfigurationJSON:  types.StringValue(`{"formatter":{"id":"torbox"}}`),
+		ManagedFingerprint: types.StringValue(managedFingerprintForConfig(json.RawMessage(`{"formatter":{"id":"torbox"}}`), configurationModel{ConfigurationJSON: types.StringValue(`{"formatter":{"id":"torbox"}}`)})),
+	}
+	if !concurrentChangeDetected(state, json.RawMessage(`{"formatter":{"id":"other"}}`)) {
+		t.Fatal("remote changes must block an update based on stale state")
+	}
+}
+
 func TestImplicitDeleteIsNeverImplemented(t *testing.T) {
 	resourceImpl := &configurationResource{}
 	response := &resource.DeleteResponse{}

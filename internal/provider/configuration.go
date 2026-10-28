@@ -206,6 +206,19 @@ func (r *configurationResource) Create(ctx context.Context, req resource.CreateR
 	}
 	config.UUID = types.StringValue(created.UUID)
 	config.ManagedFingerprint = types.StringValue(managedFingerprintForConfig(desired, config))
+	// Keep the returned UUID in state before verification so a successful POST
+	// whose response read is interrupted is not retried as a second account.
+	resp.Diagnostics.Append(resp.State.Set(ctx, &config)...)
+	verified, err := r.client.Get(ctx, aiostreams.Credentials{UUID: created.UUID, Password: password})
+	if err != nil {
+		resp.Diagnostics.AddError("AIOStreams configuration verification failed", "The configuration was created, but the provider could not verify the returned UserData; the UUID was retained in state.")
+		return
+	}
+	if err := validateJSONObject(verified); err != nil {
+		resp.Diagnostics.AddError("Invalid UserData returned after creation", err.Error())
+		return
+	}
+	config.ManagedFingerprint = types.StringValue(managedFingerprintForConfig(verified, config))
 	resp.Diagnostics.Append(resp.State.Set(ctx, &config)...)
 }
 
@@ -256,6 +269,10 @@ func (r *configurationResource) Update(ctx context.Context, req resource.UpdateR
 		resp.Diagnostics.AddError("AIOStreams configuration read before update failed", safeAPIError(err))
 		return
 	}
+	if concurrentChangeDetected(state, remote) {
+		resp.Diagnostics.AddError("Concurrent AIOStreams update detected", "The remote UserData changed after the last refresh; refusing to overwrite it. Refresh and review the new plan before retrying.")
+		return
+	}
 	desired, err := desiredDocument(ctx, config, remote)
 	if err != nil {
 		resp.Diagnostics.AddError("Invalid AIOStreams configuration", err.Error())
@@ -265,8 +282,21 @@ func (r *configurationResource) Update(ctx context.Context, req resource.UpdateR
 		resp.Diagnostics.AddError("AIOStreams configuration update failed", safeAPIError(err))
 		return
 	}
+	verified, err := r.client.Get(ctx, aiostreams.Credentials{UUID: state.UUID.ValueString(), Password: password})
+	if err != nil {
+		resp.Diagnostics.AddError("AIOStreams configuration verification failed", "The PUT completed, but the provider could not verify the resulting UserData; refresh is required before retrying.")
+		return
+	}
+	if err := validateJSONObject(verified); err != nil {
+		resp.Diagnostics.AddError("Invalid UserData returned after update", err.Error())
+		return
+	}
+	if managedFingerprintForConfig(desired, config) != managedFingerprintForConfig(verified, config) {
+		resp.Diagnostics.AddError("AIOStreams configuration verification mismatch", "The API did not persist the provider-managed UserData as requested; state was not advanced.")
+		return
+	}
 	config.UUID = state.UUID
-	config.ManagedFingerprint = types.StringValue(managedFingerprintForConfig(desired, config))
+	config.ManagedFingerprint = types.StringValue(managedFingerprintForConfig(verified, config))
 	resp.Diagnostics.Append(resp.State.Set(ctx, &config)...)
 }
 
@@ -309,6 +339,10 @@ func writeOnlyString(value types.String, name string, diags *diag.Diagnostics) (
 		return "", false
 	}
 	return value.ValueString(), true
+}
+
+func concurrentChangeDetected(state configurationModel, remote json.RawMessage) bool {
+	return !state.ManagedFingerprint.IsNull() && !state.ManagedFingerprint.IsUnknown() && state.ManagedFingerprint.ValueString() != "" && state.ManagedFingerprint.ValueString() != managedFingerprintForConfig(remote, state)
 }
 
 func configOrStateUUID(config, state types.String) types.String {
