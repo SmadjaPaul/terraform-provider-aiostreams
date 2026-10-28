@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -83,5 +84,63 @@ func TestSuppressServerDetails(t *testing.T) {
 	_, err := c.Get(context.Background(), Credentials{"x", "y"})
 	if err == nil || strings.Contains(err.Error(), "private") {
 		t.Fatalf("leaked response: %v", err)
+	}
+}
+
+func TestOperatorSessionAuthorizesProtectedCreate(t *testing.T) {
+	var saved json.RawMessage
+	loginCalls := 0
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/auth/login":
+			loginCalls++
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body["username"] != "operator" || body["password"] != "operator-secret" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			http.SetCookie(w, &http.Cookie{Name: "aiostreams.session", Value: "session", Path: "/"})
+			w.Write([]byte(`{"success":true,"data":{"username":"operator"}}`))
+		case "/api/v1/user":
+			cookie, err := r.Cookie("aiostreams.session")
+			if err != nil || cookie.Value != "session" {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			if r.Method == http.MethodPost {
+				var body struct {
+					Config json.RawMessage `json:"config"`
+				}
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				saved = body.Config
+				w.WriteHeader(http.StatusCreated)
+				w.Write([]byte(`{"success":true,"data":{"uuid":"test-uuid"}}`))
+				return
+			}
+			w.Write([]byte(`{"success":true,"data":{"userData":` + string(saved) + `}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	c, err := New(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.HTTP = srv.Client()
+	c.HTTP.Jar = jar
+	if err := c.SetOperatorAuth("operator", "operator-secret"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Create(context.Background(), "config-secret", json.RawMessage(`{"addons":[]}`)); err != nil {
+		t.Fatal(err)
+	}
+	if loginCalls != 1 {
+		t.Fatalf("expected one operator login, got %d", loginCalls)
 	}
 }

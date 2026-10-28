@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"os"
+	"strings"
 
 	"github.com/SmadjaPaul/terraform-provider-aiostreams/internal/aiostreams"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -63,6 +64,17 @@ func (p *Provider) Configure(ctx context.Context, req provider.ConfigureRequest,
 	if err != nil {
 		resp.Diagnostics.AddError("Invalid AIOStreams endpoint", err.Error())
 		return
+	}
+	if operatorAuth := os.Getenv("AIOSTREAMS_OPERATOR_AUTH"); operatorAuth != "" {
+		username, password, ok := strings.Cut(operatorAuth, ":")
+		if !ok {
+			resp.Diagnostics.AddError("Invalid AIOStreams operator credentials", "AIOSTREAMS_OPERATOR_AUTH must be a username:password pair.")
+			return
+		}
+		if err := client.SetOperatorAuth(username, password); err != nil {
+			resp.Diagnostics.AddError("Invalid AIOStreams operator credentials", err.Error())
+			return
+		}
 	}
 	p.client = client
 	p.password = os.Getenv("AIOSTREAMS_PASSWORD")
