@@ -36,6 +36,47 @@ func TestDesiredDocumentPreservesUnknownRemoteFields(t *testing.T) {
 	}
 }
 
+func TestDesiredDocumentDropsLegacyCatalogModificationsForNativePresets(t *testing.T) {
+	config := configurationModel{
+		ConfigurationJSON: types.StringValue(`{"presets":[{"type":"tmdb-addon","instanceId":"smadja-tmdb","enabled":true,"options":{}}]}`),
+	}
+	remote := json.RawMessage(`{"catalogModifications":[{"id":"cinemeta","type":"movie"}],"futureField":{"keep":true}}`)
+
+	got, err := desiredDocument(context.Background(), config, remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(got, &document); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := document["catalogModifications"]; ok {
+		t.Fatal("legacy catalog modifications must not survive a native preset transition")
+	}
+	if document["futureField"].(map[string]any)["keep"] != true {
+		t.Fatal("unknown remote fields must remain preserved")
+	}
+}
+
+func TestDesiredDocumentPreservesCatalogModificationsWithoutNativePresetOwner(t *testing.T) {
+	config := configurationModel{
+		ConfigurationJSON: types.StringValue(`{"formatter":{"id":"tamtaro"}}`),
+	}
+	remote := json.RawMessage(`{"catalogModifications":[{"id":"cinemeta","type":"movie"}]}`)
+
+	got, err := desiredDocument(context.Background(), config, remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(got, &document); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := document["catalogModifications"]; !ok {
+		t.Fatal("catalog modifications must remain when no native preset document owns the boundary")
+	}
+}
+
 func TestPublicJSONRejectsSecretFields(t *testing.T) {
 	config := configurationModel{
 		ConfigurationJSON: types.StringValue(`{"tmdbApiKey":"must-not-be-state"}`),

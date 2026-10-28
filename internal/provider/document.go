@@ -31,6 +31,9 @@ func desiredDocument(ctx context.Context, config configurationModel, remote json
 			return nil, err
 		}
 		mergeObject(base, overlay)
+		if name == "configuration_json" {
+			clearNativeCatalogBoundary(base, overlay)
+		}
 	}
 
 	if values, present, err := stringList(ctx, config.PreferredLanguages); err != nil {
@@ -208,6 +211,19 @@ func desiredDocument(ctx context.Context, config configurationModel, remote json
 		return nil, fmt.Errorf("marshal UserData: %w", err)
 	}
 	return result, nil
+}
+
+// A native family document owns its preset list. When that document does not
+// declare catalogModifications, an older HCL catalogs overlay must not survive
+// the transition as a stale, provider-managed field. Other remote fields stay
+// untouched so unknown UserData remains losslessly preserved.
+func clearNativeCatalogBoundary(base, overlay map[string]any) {
+	if _, hasPresets := overlay["presets"]; !hasPresets {
+		return
+	}
+	if _, hasCatalogModifications := overlay["catalogModifications"]; !hasCatalogModifications {
+		delete(base, "catalogModifications")
+	}
 }
 
 func profileFromObject(value types.Object) (profileModel, error) {
