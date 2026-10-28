@@ -39,7 +39,7 @@ func (p *Provider) Schema(_ context.Context, _ provider.SchemaRequest, resp *pro
 		Attributes: map[string]providerschema.Attribute{
 			"endpoint": providerschema.StringAttribute{
 				Optional:    true,
-				Description: "AIOStreams HTTPS origin. HTTP is accepted only for loopback qualification.",
+				Description: "AIOStreams HTTPS origin. HTTP is accepted only for loopback or Kubernetes Service qualification.",
 			},
 		},
 	}
