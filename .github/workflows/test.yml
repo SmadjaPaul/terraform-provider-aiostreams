@@ -6,6 +6,8 @@ permissions:
   contents: read
 jobs:
   test:
+    # Stable check name for branch protection; validate both normal PRs and pushes.
+    name: provider-go-tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
