@@ -1,0 +1,29 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":rebaseStalePrs"
+  ],
+  "dependencyDashboard": true,
+  "automerge": false,
+  "platformAutomerge": false,
+  "timezone": "Europe/Paris",
+  "prConcurrentLimit": 4,
+  "prHourlyLimit": 2,
+  "packageRules": [
+    {
+      "description": "Terraform plugin framework and Go dependencies require race tests and vet before merge.",
+      "matchManagers": [
+        "gomod"
+      ],
+      "automerge": false
+    },
+    {
+      "description": "Workflow actions remain manually qualified until SHA-pinning and CI gate are established.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "automerge": false
+    }
+  ]
+}
