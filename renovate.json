@@ -24,6 +24,55 @@
         "github-actions"
       ],
       "automerge": false
+    },
+    {
+      "description": "PLT-131 Go pilot: only indirect test/output helpers, race tests and vet required.",
+      "enabled": true,
+      "groupName": "PLT-131 provider Go non-critical pilot",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchFileNames": [
+        "go.mod"
+      ],
+      "matchDepTypes": [
+        "indirect"
+      ],
+      "matchPackageNames": [
+        "github.com/fatih/color",
+        "github.com/mitchellh/go-testing-interface"
+      ],
+      "matchUpdateTypes": [
+        "patch",
+        "minor"
+      ],
+      "matchCurrentVersion": "!/^0\\./",
+      "minimumReleaseAge": "14 days",
+      "automerge": true,
+      "automergeType": "pr",
+      "platformAutomerge": true
+    },
+    {
+      "description": "PLT-131 provider actions remain controlled: workflow changes need explicit qualification.",
+      "enabled": true,
+      "groupName": "PLT-131 provider CI actions controlled",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchFileNames": [
+        ".github/workflows/*.yml"
+      ],
+      "matchPackageNames": [
+        "actions/checkout",
+        "actions/setup-go"
+      ],
+      "matchUpdateTypes": [
+        "patch",
+        "minor"
+      ],
+      "minimumReleaseAge": "14 days",
+      "automerge": false,
+      "platformAutomerge": false
     }
   ]
 }
