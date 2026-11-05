@@ -44,7 +44,7 @@
       ]
     },
     {
-      "description": "PLT-131 utility-only Go indirect patch pilot; excludes protocol, networking and pre-1 modules; 14-day cooldown and race/vet CI",
+      "description": "PLT-131 five stable indirect Go utilities patch-only; 14-day age, race/vet required",
       "groupName": "PLT-131 provider Go non-critical pilot",
       "matchManagers": [
         "gomod"
@@ -60,9 +60,7 @@
         "github.com/mitchellh/go-testing-interface",
         "github.com/hashicorp/go-hclog",
         "github.com/hashicorp/go-uuid",
-        "github.com/oklog/run",
-        "github.com/vmihailenco/msgpack/v5",
-        "github.com/vmihailenco/tagparser/v2"
+        "github.com/oklog/run"
       ],
       "matchUpdateTypes": [
         "patch"
