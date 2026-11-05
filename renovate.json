@@ -8,6 +8,7 @@
   "updateInternalDeps": true,
   "automerge": false,
   "platformAutomerge": false,
+  "internalChecksFilter": "strict",
   "timezone": "Europe/Paris",
   "prConcurrentLimit": 4,
   "prHourlyLimit": 2,
@@ -44,7 +45,7 @@
       ]
     },
     {
-      "description": "PLT-131 Go pilot policy: indirect test/output helpers require patch/minor, 14-day maturity, race tests and vet.",
+      "description": "PLT-131 five stable indirect Go utilities patch-only; 14-day age, race/vet required",
       "groupName": "PLT-131 provider Go non-critical pilot",
       "matchManagers": [
         "gomod"
@@ -57,16 +58,19 @@
       ],
       "matchPackageNames": [
         "github.com/fatih/color",
-        "github.com/mitchellh/go-testing-interface"
+        "github.com/mitchellh/go-testing-interface",
+        "github.com/hashicorp/go-hclog",
+        "github.com/hashicorp/go-uuid",
+        "github.com/oklog/run"
       ],
       "matchUpdateTypes": [
-        "patch",
-        "minor"
+        "patch"
       ],
       "matchCurrentVersion": "!/^0\\./",
       "minimumReleaseAge": "14 days",
-      "automerge": false,
-      "platformAutomerge": false
+      "automerge": true,
+      "platformAutomerge": true,
+      "automergeType": "pr"
     },
     {
       "description": "PLT-131 provider actions remain controlled: workflow changes need explicit qualification.",
