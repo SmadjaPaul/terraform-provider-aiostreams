@@ -44,7 +44,7 @@
       ]
     },
     {
-      "description": "PLT-131 Go pilot policy: indirect test/output helpers require patch/minor, 14-day maturity, race tests and vet.",
+      "description": "PLT-131 utility-only Go indirect patch pilot; excludes protocol, networking and pre-1 modules; 14-day cooldown and race/vet CI",
       "groupName": "PLT-131 provider Go non-critical pilot",
       "matchManagers": [
         "gomod"
@@ -57,16 +57,21 @@
       ],
       "matchPackageNames": [
         "github.com/fatih/color",
-        "github.com/mitchellh/go-testing-interface"
+        "github.com/mitchellh/go-testing-interface",
+        "github.com/hashicorp/go-hclog",
+        "github.com/hashicorp/go-uuid",
+        "github.com/oklog/run",
+        "github.com/vmihailenco/msgpack/v5",
+        "github.com/vmihailenco/tagparser/v2"
       ],
       "matchUpdateTypes": [
-        "patch",
-        "minor"
+        "patch"
       ],
       "matchCurrentVersion": "!/^0\\./",
       "minimumReleaseAge": "14 days",
-      "automerge": false,
-      "platformAutomerge": false
+      "automerge": true,
+      "platformAutomerge": true,
+      "automergeType": "pr"
     },
     {
       "description": "PLT-131 provider actions remain controlled: workflow changes need explicit qualification.",
