@@ -8,6 +8,7 @@
   "updateInternalDeps": true,
   "automerge": false,
   "platformAutomerge": false,
+  "internalChecksFilter": "strict",
   "timezone": "Europe/Paris",
   "prConcurrentLimit": 4,
   "prHourlyLimit": 2,
