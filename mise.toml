@@ -1,0 +1,21 @@
+# Repository toolchain contract (tool-portability design, batch 4, PLT-484).
+# Exact versions, locked in mise.lock for macos-arm64, linux-x64 and linux-arm64
+# (`mise lock --platform macos-arm64,linux-x64,linux-arm64`); install with `mise install --locked`.
+# go.mod is the authority for the Go version (`go 1.24.0`, also read by setup-go via go-version-file).
+# No secrets here: [env] only carries non-sensitive tool settings.
+[env]
+MISE_AUTO_UPDATE = "false"
+GOTOOLCHAIN = "local"   # never download a toolchain implicitly; use the locked Go
+
+[tools]
+go = "1.24.0"             # go.mod
+# goreleaser stays pinned by .github/workflows/release.yml (goreleaser-action, version v2.11.2):
+# mise 2026.4.8 writes no URL/checksum for aqua:goreleaser/goreleaser, so `mise install --locked` cannot install it.
+
+[settings]
+lockfile = true
+
+# No justfile or Makefile: same commands as .github/workflows/test.yml.
+[tasks.test]
+description = "Unit tests with the race detector, then go vet (as in CI)"
+run = ["go test -race ./...", "go vet ./..."]
