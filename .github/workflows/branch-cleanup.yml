@@ -1,0 +1,127 @@
+name: Branch cleanup
+
+# Supprime les branches que GitHub garde après une PR non fusionnée.
+# (a) PR fermée sans fusion : supprime sa branche (même dépôt, ni défaut, ni protégée,
+#     pas de PR ouverte dessus ou basée dessus, branche non déplacée depuis la fermeture).
+# (b) Balayage hebdomadaire : supprime les branches dont une PR est fusionnée ou fermée,
+#     sans PR ouverte, sans commit depuis STALE_DAYS jours, ni défaut, ni protégée.
+#     Déclenchement manuel : dry_run=true par défaut (liste sans supprimer).
+# Aucune action tierce, aucun secret : gh et jq du runner, GITHUB_TOKEN seul.
+# Modèle : Atlas templates/repo/.github/workflows/branch-cleanup.yml.
+
+on:
+  pull_request:
+    types: [closed]
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Lister sans supprimer"
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: branch-cleanup
+  cancel-in-progress: false
+
+jobs:
+  closed-unmerged-pr:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.merged == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref != github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BRANCH: ${{ github.event.pull_request.head.ref }}
+      EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+    steps:
+      - name: Supprimer la branche de la PR fermée sans fusion
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          enc="$(jq -rn --arg v "$BRANCH" '$v|@uri')"
+
+          info="$(gh api "repos/$repo/branches/$enc" --jq '[.protected, .commit.sha]|@tsv' 2>/dev/null || true)"
+          if [[ -z "$info" ]]; then echo "BRANCH_ALREADY_GONE=$BRANCH"; exit 0; fi
+          IFS=$'\t' read -r protected sha <<<"$info"
+          if [[ "$protected" != "false" ]]; then echo "SKIP_PROTECTED=$BRANCH"; exit 0; fi
+          if [[ "$sha" != "$EXPECTED_SHA" ]]; then echo "SKIP_MOVED_AFTER_CLOSE=$BRANCH"; exit 0; fi
+
+          # Règles de ruleset : 403 « Upgrade » = rulesets indisponibles (dépôt privé, plan Free).
+          if ! rules="$(gh api "repos/$repo/rules/branches/$enc" --jq 'length' 2>&1)"; then
+            grep -q 'Upgrade to GitHub Pro' <<<"$rules" || { echo "SKIP_RULES_UNREADABLE=$BRANCH"; exit 0; }
+            rules=0
+          fi
+          if [[ "$rules" != "0" ]]; then echo "SKIP_RULESET=$BRANCH"; exit 0; fi
+
+          # Une autre PR ouverte part de cette branche ou la vise (PR empilée) : on garde.
+          open="$(gh api --paginate "repos/$repo/pulls?state=open&per_page=100" \
+            --jq '.[] | select((.head.repo.full_name == env.GITHUB_REPOSITORY and .head.ref == env.BRANCH) or .base.ref == env.BRANCH) | .number')"
+          if [[ -n "$open" ]]; then echo "SKIP_OPEN_PR=$BRANCH (PR $open)"; exit 0; fi
+
+          gh api --method DELETE "repos/$repo/git/refs/heads/$enc"
+          echo "DELETED_CLOSED_UNMERGED=$BRANCH (PR #$PR_NUMBER)"
+
+  weekly-sweep:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && (inputs.dry_run && 'true' || 'false') || 'false' }}
+      STALE_DAYS: "30"
+    steps:
+      - name: Balayer les branches de PR fusionnées ou fermées
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          cutoff="$(( $(date -u +%s) - STALE_DAYS * 86400 ))"
+          echo "DRY_RUN=$DRY_RUN STALE_DAYS=$STALE_DAYS"
+
+          # state, branche tête (même dépôt seulement, sinon vide), branche de base
+          prs="$(gh api --paginate "repos/$repo/pulls?state=all&per_page=100" --jq \
+            '.[] | [.state, (if .head.repo.full_name == env.GITHUB_REPOSITORY then .head.ref else "" end), .base.ref] | @tsv')"
+          keep="$(awk -F'\t' '$1=="open"{ if ($2!="") print $2; print $3 }' <<<"$prs" | sort -u)"
+          closed="$(awk -F'\t' '$1=="closed" && $2!=""{ print $2 }' <<<"$prs" | sort -u)"
+
+          deleted=0; kept=0
+          while IFS=$'\t' read -r branch protected sha; do
+            [[ -n "$branch" && "$branch" != "$DEFAULT_BRANCH" ]] || continue
+            if grep -qxF -- "$branch" <<<"$keep"; then echo "KEEP_OPEN_PR=$branch"; kept=$((kept+1)); continue; fi
+            grep -qxF -- "$branch" <<<"$closed" || continue   # sans PR : jamais touchée
+            if [[ "$protected" != "false" ]]; then echo "KEEP_PROTECTED=$branch"; kept=$((kept+1)); continue; fi
+            enc="$(jq -rn --arg v "$branch" '$v|@uri')"
+            if ! rules="$(gh api "repos/$repo/rules/branches/$enc" --jq 'length' 2>&1)"; then
+              grep -q 'Upgrade to GitHub Pro' <<<"$rules" || { echo "KEEP_RULES_UNREADABLE=$branch"; kept=$((kept+1)); continue; }
+              rules=0
+            fi
+            if [[ "$rules" != "0" ]]; then echo "KEEP_RULESET=$branch"; kept=$((kept+1)); continue; fi
+            date="$(gh api "repos/$repo/commits/$sha" --jq '.commit.committer.date')"
+            if (( $(date -u -d "$date" +%s) > cutoff )); then echo "KEEP_RECENT=$branch ($date)"; kept=$((kept+1)); continue; fi
+            if [[ "$DRY_RUN" == "true" ]]; then
+              echo "WOULD_DELETE=$branch ($date)"
+            else
+              gh api --method DELETE "repos/$repo/git/refs/heads/$enc" >/dev/null
+              echo "DELETED=$branch ($date)"
+            fi
+            deleted=$((deleted+1))
+          done < <(gh api --paginate "repos/$repo/branches?per_page=100" --jq '.[] | [.name, .protected, .commit.sha] | @tsv')
+
+          echo "SWEEP_DELETED_OR_WOULD=$deleted SWEEP_KEPT=$kept"
+          echo "### branch-cleanup : $deleted supprimée(s) (dry_run=$DRY_RUN), $kept gardée(s)" >> "$GITHUB_STEP_SUMMARY"
