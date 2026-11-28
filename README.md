@@ -29,4 +29,13 @@ This repository is not an Atlantis production release yet. The corresponding
 `homelab-infra/terraform/aiostreams` root remains pending dedicated backend,
 provider distribution, identity, recovery and runtime admission.
 
+## Agent pod setup (Optio)
+
+Optio runs `.optio/setup.sh` once per agent pod. The script installs the Go
+version of `go.mod` from the official archive named in `mise.lock`, verifies its
+sha256, and links `go` in `$HOME/.local/bin`, without privilege. A failure does
+not stop the pod: the pod log shows `SETUP_STATUS=FAIL`. Re-run it with
+`OPTIO_SETUP_STRICT=1 .optio/setup.sh` to get the error. `go test -race` also
+needs a C compiler, which the script does not install.
+
 Reference: https://docs.aiostreams.viren070.me/apis/user/
