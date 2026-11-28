@@ -200,22 +200,49 @@ func TestCloneObjectSharesTheObjectsContainedInAList(t *testing.T) {
 	}
 }
 
-func TestCloneObjectTurnsAnEmptyListIntoNull(t *testing.T) {
-	// Known limitation: an empty list is copied as a nil slice, so it is
-	// written back as a JSON null instead of an empty JSON array.
+func TestCloneObjectKeepsAnEmptyListAsAnEmptyArray(t *testing.T) {
+	// An empty list is a list: it must be cloned as an empty list and written
+	// back as an empty JSON array, not as a JSON null.
 	original := decodeDocument(t, `{"options":[]}`)
 	clone := cloneObject(original)
 
 	options, ok := clone["options"].([]any)
-	if !ok || options != nil {
-		t.Fatalf("documented limitation: an empty list is cloned as a nil list: %#v", clone["options"])
+	if !ok {
+		t.Fatalf("an empty list must stay a list: %#v", clone["options"])
+	}
+	if options == nil {
+		t.Fatalf("an empty list must not be cloned as a nil list: %#v", clone["options"])
+	}
+	if len(options) != 0 {
+		t.Fatalf("an empty list must stay empty: %#v", clone["options"])
 	}
 	encoded, err := json.Marshal(clone)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(encoded) != `{"options":null}` {
-		t.Fatalf("documented limitation: an empty list is written as a null: %s", encoded)
+	if string(encoded) != `{"options":[]}` {
+		t.Fatalf("an empty list must be written as an empty array: %s", encoded)
+	}
+}
+
+func TestMergeObjectKeepsAnEmptyListOfAClonedOverlayObject(t *testing.T) {
+	// The overlay object is cloned before it is merged, so the empty list it
+	// carries must survive that clone as an empty list and not as a null.
+	base := decodeDocument(t, `{"formatter":{"id":"torbox"}}`)
+	overlay := decodeDocument(t, `{"jellyfin":{"primary":{"name":"Paul","options":[]}}}`)
+
+	mergeObject(base, overlay)
+
+	primary := base["jellyfin"].(map[string]any)["primary"].(map[string]any)
+	options, ok := primary["options"].([]any)
+	if !ok {
+		t.Fatalf("an empty list must stay a list: %#v", primary["options"])
+	}
+	if options == nil {
+		t.Fatalf("an empty list must not be merged as a nil list: %#v", primary["options"])
+	}
+	if len(options) != 0 {
+		t.Fatalf("an empty list must stay empty: %#v", primary["options"])
 	}
 }
 

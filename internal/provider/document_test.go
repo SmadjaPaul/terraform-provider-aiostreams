@@ -66,6 +66,39 @@ func TestDesiredDocumentPreservesUnknownRemoteFields(t *testing.T) {
 	}
 }
 
+func TestDesiredDocumentWritesAnEmptyListAsAnEmptyArray(t *testing.T) {
+	// The managed overlay object is cloned before it is merged into the
+	// document, so the empty list it carries must be written as an empty JSON
+	// array and not as a JSON null.
+	config := configurationModel{
+		ConfigurationJSON: types.StringValue(`{"jellyfin":{"primary":{"name":"Paul","options":[]}}}`),
+	}
+	remote := json.RawMessage(`{"uuid":"11111111-1111-1111-1111-111111111111"}`)
+
+	got, err := desiredDocument(context.Background(), config, remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(got, &document); err != nil {
+		t.Fatal(err)
+	}
+	primary := document["jellyfin"].(map[string]any)["primary"].(map[string]any)
+	options, ok := primary["options"].([]any)
+	if !ok {
+		t.Fatalf("an empty list must stay a list: %#v", primary["options"])
+	}
+	if options == nil {
+		t.Fatalf("an empty list must not be written as a null: %#v", primary["options"])
+	}
+	if len(options) != 0 {
+		t.Fatalf("an empty list must stay empty: %#v", primary["options"])
+	}
+	if !strings.Contains(string(got), `"options":[]`) {
+		t.Fatalf("an empty list must be written as an empty array: %s", got)
+	}
+}
+
 func TestDesiredDocumentDropsLegacyCatalogModificationsForNativePresets(t *testing.T) {
 	config := configurationModel{
 		ConfigurationJSON: types.StringValue(`{"presets":[{"type":"tmdb-addon","instanceId":"smadja-tmdb","enabled":true,"options":{}}]}`),

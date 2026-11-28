@@ -409,7 +409,12 @@ func cloneObject(value map[string]any) map[string]any {
 		if nested, ok := child.(map[string]any); ok {
 			out[key] = cloneObject(nested)
 		} else if list, ok := child.([]any); ok {
-			out[key] = append([]any(nil), list...)
+			// An empty list is a list: copying it into a nil slice would turn
+			// it into a null in the written document. The container is copied,
+			// the objects it holds stay shared with the original.
+			copied := make([]any, len(list))
+			copy(copied, list)
+			out[key] = copied
 		} else {
 			out[key] = child
 		}
